@@ -6,70 +6,57 @@ import 'package:provider/provider.dart';
 // ---------------- Model ----------------
 class Article {
   final int id;
-  final String title;
-  final String body;
-
+  final String title, body;
   Article({required this.id, required this.title, required this.body});
 
-  factory Article.fromJson(Map<String, dynamic> json) {
-    return Article(
-      id: json['id'] as int,
-      title: json['title'] as String,
-      body: json['body'] as String,
-    );
-  }
+  factory Article.fromJson(Map<String, dynamic> j) =>
+      Article(id: j['id'], title: j['title'], body: j['body']);
 }
 
 // ---------------- Service (REST API) ----------------
 class NewsService {
   Future<List<Article>> fetchArticles() async {
-    final response = await http
+    final res = await http
         .get(Uri.parse('https://jsonplaceholder.typicode.com/posts'))
         .timeout(const Duration(seconds: 15));
-
-    if (response.statusCode != 200) {
-      throw Exception('Server error: ${response.statusCode}');
+    if (res.statusCode != 200) {
+      throw Exception('Server error: ${res.statusCode}');
     }
-
-    final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-    return data
-        .map((e) => Article.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List data = jsonDecode(res.body);
+    return data.map((e) => Article.fromJson(e)).toList();
   }
 }
 
 // ---------------- Provider (business logic) ----------------
-enum LoadStatus { loading, success, error }
+enum Status { loading, success, error }
 
 class NewsProvider extends ChangeNotifier {
   final NewsService _service = NewsService();
 
-  LoadStatus status = LoadStatus.loading;
+  Status status = Status.loading;
   String errorMessage = '';
   List<Article> _articles = [];
   final Set<int> _favorites = {};
   String _query = '';
 
-  List<Article> get filtered {
-    if (_query.isEmpty) return _articles;
-    return _articles
-        .where((a) => a.title.toLowerCase().contains(_query.toLowerCase()))
-        .toList();
-  }
+  List<Article> get filtered => _query.isEmpty
+      ? _articles
+      : _articles
+            .where((a) => a.title.toLowerCase().contains(_query.toLowerCase()))
+            .toList();
 
   int get favoritesCount => _favorites.length;
-
   bool isFavorite(int id) => _favorites.contains(id);
 
   Future<void> load() async {
-    status = LoadStatus.loading;
+    status = Status.loading;
     notifyListeners();
     try {
       _articles = await _service.fetchArticles();
-      status = LoadStatus.success;
+      status = Status.success;
     } catch (e) {
-      errorMessage = 'Failed to load articles.\n$e';
-      status = LoadStatus.error;
+      errorMessage = e.toString();
+      status = Status.error;
     }
     notifyListeners();
   }
@@ -80,40 +67,28 @@ class NewsProvider extends ChangeNotifier {
   }
 
   void toggleFavorite(int id) {
-    if (_favorites.contains(id)) {
-      _favorites.remove(id);
-    } else {
-      _favorites.add(id);
-    }
+    _favorites.contains(id) ? _favorites.remove(id) : _favorites.add(id);
     notifyListeners();
   }
 }
 
 // ---------------- App ----------------
-void main() {
-  runApp(
-    ChangeNotifierProvider<NewsProvider>(
-      create: (_) => NewsProvider()..load(),
-      child: const NewsApp(),
-    ),
-  );
-}
+void main() => runApp(
+  ChangeNotifierProvider(
+    create: (_) => NewsProvider()..load(),
+    child: const NewsApp(),
+  ),
+);
 
 class NewsApp extends StatelessWidget {
   const NewsApp({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'News Reader',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
-      home: const NewsListScreen(),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    title: 'News Reader',
+    theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
+    home: const NewsListScreen(),
+  );
 }
 
 // ---------------- List screen ----------------
@@ -123,7 +98,6 @@ class NewsListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.watch<NewsProvider>();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('News Reader'),
@@ -161,71 +135,72 @@ class NewsListScreen extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(child: _buildContent(context, p)),
+          Expanded(child: _body(context, p)),
         ],
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context, NewsProvider p) {
-    if (p.status == LoadStatus.loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (p.status == LoadStatus.error) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(p.errorMessage, textAlign: TextAlign.center),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: p.load,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final list = p.filtered;
-    if (list.isEmpty) {
-      return const Center(child: Text('No articles found'));
-    }
-
-    return ListView.builder(
-      itemCount: list.length,
-      itemBuilder: (context, i) {
-        final a = list[i];
-        final fav = p.isFavorite(a.id);
-        return ListTile(
-          leading: CircleAvatar(child: Text('${a.id}')),
-          title: Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: Text(a.body, maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: IconButton(
-            icon: Icon(
-              fav ? Icons.favorite : Icons.favorite_border,
-              color: fav ? Colors.red : null,
-            ),
-            onPressed: () => p.toggleFavorite(a.id),
+  Widget _body(BuildContext context, NewsProvider p) {
+    switch (p.status) {
+      case Status.loading:
+        return const Center(child: CircularProgressIndicator());
+      case Status.error:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(p.errorMessage, textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: p.load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
           ),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ArticleDetailScreen(article: a),
+        );
+      case Status.success:
+        final list = p.filtered;
+        if (list.isEmpty) return const Center(child: Text('No articles found'));
+        return ListView.builder(
+          itemCount: list.length,
+          itemBuilder: (_, i) {
+            final a = list[i];
+            return ListTile(
+              leading: CircleAvatar(child: Text('${a.id}')),
+              title: Text(
+                a.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                a.body,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: IconButton(
+                icon: Icon(
+                  p.isFavorite(a.id) ? Icons.favorite : Icons.favorite_border,
+                  color: p.isFavorite(a.id) ? Colors.red : null,
+                ),
+                onPressed: () => p.toggleFavorite(a.id),
+              ),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ArticleDetailScreen(article: a),
+                ),
               ),
             );
           },
         );
-      },
-    );
+    }
   }
 }
 
@@ -238,7 +213,6 @@ class ArticleDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.watch<NewsProvider>();
     final fav = p.isFavorite(article.id);
-
     return Scaffold(
       appBar: AppBar(
         title: Text('Article #${article.id}'),
